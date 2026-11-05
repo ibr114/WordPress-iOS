@@ -418,11 +418,14 @@ platform :ios do
   end
 
   # Boots the simulator, and returns whether it finished booting.
+  #
+  # `simctl bootstatus` exits 0 even when the device shuts down partway through booting, so this
+  # asks for the device's state afterwards.
   def simulator_booted?(udid)
     sh('xcrun', 'simctl', 'boot', udid, error_callback: ->(_) {}) # It may already be booted.
-    booted = true
-    sh('xcrun', 'simctl', 'bootstatus', udid, error_callback: ->(_) { booted = false })
-    booted
+    sh('xcrun', 'simctl', 'bootstatus', udid, error_callback: ->(_) {})
+    devices = JSON.parse(sh('xcrun', 'simctl', 'list', 'devices', '--json', log: false))['devices']
+    devices.values.flatten.find { |d| d['udid'] == udid }&.fetch('state') == 'Booted'
   end
 
   def prepare_screenshot_simulator(name:, device_type:)
