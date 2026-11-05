@@ -121,7 +121,10 @@ platform :ios do
 
     failures = []
     devices.each do |name, settings|
-      udid = prepare_screenshot_simulator(name: "Screenshots #{name}", device_type: settings[:type])
+      # A CI VM is thrown away after the job, so it uses the simulators the image comes with, which
+      # have been booted before: a new one has to migrate its data on its first boot, which has
+      # crashed on CI. On a Mac, the screenshots get simulators of their own.
+      udid = prepare_screenshot_simulator(name: is_ci ? name : "Screenshots #{name}", device_type: settings[:type])
       locales.each do |locale|
         UI.header("#{name}: #{locale}")
         run = File.join(results, "#{name}-#{locale}")
@@ -361,8 +364,7 @@ platform :ios do
 
   # The UDID of the simulator called `name`, created on the newest iOS runtime if there isn't one.
   def find_or_create_simulator(name:, device_type:)
-    devices = JSON.parse(sh('xcrun', 'simctl', 'list', 'devices', 'available', '--json', log: false))['devices']
-    udid = devices.values.flatten.find { |d| d['name'] == name }&.fetch('udid')
+    udid = newest_simulator_named(name)
     return udid unless udid.nil?
 
     sh('xcrun', 'simctl', 'create', name, device_type, newest_runtime_running(device_type)).strip
@@ -390,11 +392,43 @@ platform :ios do
   # screenshot: light mode, and a status bar that shows 9:41, full signal and a full battery.
   #
   # @return [String] The simulator's UDID.
+  # The UDID of the simulator called `name` on the newest iOS, when there's more than one, or nil.
+  def newest_simulator_named(name)
+    devices = JSON.parse(sh('xcrun', 'simctl', 'list', 'devices', 'available', '--json', log: false))['devices']
+    matches = devices.flat_map do |runtime, runtime_devices|
+      version = ios_version(runtime)
+      version.nil? ? [] : runtime_devices.select { |d| d['name'] == name }.map { |d| [version, d['udid']] }
+    end
+    matches.max_by(&:first)&.last
+  end
+
+  # The iOS version of a simulator runtime identifier, such as 27.2 for `…SimRuntime.iOS-27-2`, or nil.
+  def ios_version(runtime)
+    version = runtime[/\.iOS-(\d+(?:-\d+)*)/, 1]
+    version && Gem::Version.new(version.tr('-', '.'))
+  end
+
+  # Boots the simulator and waits for it, trying once more if it shuts down while it boots.
+  def boot_simulator(udid)
+    return if simulator_booted?(udid)
+
+    UI.important("The simulator #{udid} didn't boot, so it's being booted again.")
+    sh('xcrun', 'simctl', 'shutdown', udid, error_callback: ->(_) {})
+    UI.user_error!("The simulator #{udid} didn't boot.") unless simulator_booted?(udid)
+  end
+
+  # Boots the simulator, and returns whether it finished booting.
+  def simulator_booted?(udid)
+    sh('xcrun', 'simctl', 'boot', udid, error_callback: ->(_) {}) # It may already be booted.
+    booted = true
+    sh('xcrun', 'simctl', 'bootstatus', udid, error_callback: ->(_) { booted = false })
+    booted
+  end
+
   def prepare_screenshot_simulator(name:, device_type:)
     udid = find_or_create_simulator(name: name, device_type: device_type)
 
-    sh('xcrun', 'simctl', 'boot', udid, error_callback: ->(_) {}) # It may already be booted.
-    sh('xcrun', 'simctl', 'bootstatus', udid)
+    boot_simulator(udid)
     sh('xcrun', 'simctl', 'ui', udid, 'appearance', 'light')
     sh(
       'xcrun', 'simctl', 'status_bar', udid, 'override',
