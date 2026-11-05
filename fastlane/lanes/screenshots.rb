@@ -365,15 +365,25 @@ platform :ios do
     udid = devices.values.flatten.find { |d| d['name'] == name }&.fetch('udid')
     return udid unless udid.nil?
 
-    sh('xcrun', 'simctl', 'create', name, device_type, newest_ios_runtime, log: false).strip
+    sh('xcrun', 'simctl', 'create', name, device_type, newest_runtime_running(device_type)).strip
   end
 
-  # The identifier of the newest iOS simulator runtime installed.
-  def newest_ios_runtime
+  # The identifier of the newest iOS simulator runtime that runs `device_type`.
+  #
+  # Not every runtime runs every device. The iPhone Duo has runtimes of its own, such as iOS 27.1 and
+  # `iOS-27-2-iPhone19-4`, which run nothing else: creating an iPhone 18 Pro Max on one fails with
+  # "Incompatible device".
+  def newest_runtime_running(device_type)
     runtimes = JSON.parse(sh('xcrun', 'simctl', 'list', 'runtimes', 'available', '--json', log: false))['runtimes']
-    runtime = runtimes.select { |r| r['platform'] == 'iOS' }.max_by { |r| Gem::Version.new(r['version']) }
-    UI.user_error!('No iOS simulator runtime is installed.') if runtime.nil?
+    runtime = runtimes
+              .select { |r| r['platform'] == 'iOS' && runs_device?(r, device_type) }
+              .max_by { |r| Gem::Version.new(r['version']) }
+    UI.user_error!("No iOS simulator runtime installed runs #{device_type}.") if runtime.nil?
     runtime['identifier']
+  end
+
+  def runs_device?(runtime, device_type)
+    runtime.fetch('supportedDeviceTypes', []).any? { |type| type['identifier'] == device_type }
   end
 
   # Finds or creates the simulator called `name`, boots it, and sets it up to look the same in every
@@ -384,7 +394,7 @@ platform :ios do
     udid = find_or_create_simulator(name: name, device_type: device_type)
 
     sh('xcrun', 'simctl', 'boot', udid, error_callback: ->(_) {}) # It may already be booted.
-    sh('xcrun', 'simctl', 'bootstatus', udid, log: false)
+    sh('xcrun', 'simctl', 'bootstatus', udid)
     sh('xcrun', 'simctl', 'ui', udid, 'appearance', 'light')
     sh(
       'xcrun', 'simctl', 'status_bar', udid, 'override',

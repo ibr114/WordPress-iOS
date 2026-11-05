@@ -11,9 +11,9 @@ priority: -1
 agents:
   queue: mac
 env:
-  # The iPhone Duo's screenshots need an app built with the iOS 27.1 SDK: built with an older one,
-  # the app runs letterboxed on the Duo's outer display.
-  IMAGE_ID: xcode-27.1
+  # The iPhone Duo's screenshots need an app built with the iOS 27.1 SDK or later: built with an
+  # older one, the app runs letterboxed on the Duo's outer display.
+  IMAGE_ID: xcode-27.2-rc.1
 
 # The App Store languages the screenshots are taken in: the folders in fastlane/appstoreres/jetpack_metadata.
 x-locales: &locales
